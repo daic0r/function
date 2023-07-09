@@ -119,7 +119,8 @@ namespace ice {
          lhs.swap(rhs);
       }
 
-      R operator()(Args&&... args) {
+      template<typename... Ts>
+      R operator()(Ts&&... args) {
 #ifdef DEBUG
          std::cout << "*DEBUG: Calling with variant index " << m_data.index() << std::endl;
 #endif
@@ -129,10 +130,10 @@ namespace ice {
                },
                // C++20 version below
                //[this, ... args = std::forward<Args>(args)](auto&&) 
-               [this, args = std::make_tuple(std::forward<Args>(args)...)](auto&&) mutable -> R {
-                  return std::apply([this](Args&&... args)
+               [this, args = std::make_tuple(std::forward<Ts>(args)...)](auto&&) mutable -> R {
+                  return std::apply([this](auto&&... args)
                      { 
-                        return ptr()->invoke(std::forward<Args>(args)...); 
+                        return ptr()->invoke(std::forward<decltype(args)>(args)...); 
                      },
                      std::move(args)
                   );
