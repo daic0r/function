@@ -3,12 +3,12 @@
 
 #include <cstddef>
 #include <array>
-#include <debug/assertions.h>
-#include <stdexcept>
 #include <type_traits>
 #include <variant>
 #include <memory>
 #include <utility>
+#include <tuple>
+#include <stdexcept>
 
 #ifdef DEBUG
 #include <iostream>
@@ -119,44 +119,55 @@ namespace ice {
          lhs.swap(rhs);
       }
 
-      R operator()(Args... args) {
+      R operator()(Args&&... args) {
+#ifdef DEBUG
+         std::cout << "*DEBUG: Calling with variant index " << m_data.index() << std::endl;
+#endif
          return std::visit(overload{
-               [](std::monostate) -> R {
+               [](std::monostate) mutable -> R {
                   throw std::runtime_error("no callable contained");
                },
-               [this, ... args = std::forward<Args>(args)](auto&&) 
-               { 
-                  return ptr()->invoke(args...); 
-               }, 
+               // C++20 version below
+               //[this, ... args = std::forward<Args>(args)](auto&&) 
+               [this, args = std::make_tuple(std::forward<Args>(args)...)](auto&&) mutable -> R {
+                  return std::apply([this](Args&&... args)
+                     { 
+                        return ptr()->invoke(std::forward<Args>(args)...); 
+                     },
+                     std::move(args)
+                  );
+               }
          }, m_data);
       }
 
    private:
-      concept_interface* ptr() noexcept {
+      template<typename Self>
+      static auto ptr(Self&& self) noexcept {
+         constexpr auto bIsConst = std::is_const_v<std::remove_reference_t<Self>>;
+         using ret_t = std::conditional_t<bIsConst, concept_interface const*, concept_interface*>;
          return std::visit(overload{
-               [](std::monostate) -> concept_interface* {
+               [](std::monostate) -> ret_t {
                   return nullptr;
                },
-               [this](buf_t& buf) {
-                  return reinterpret_cast<concept_interface*>(buf.data());
+               [](std::conditional_t<bIsConst, buf_t const&, buf_t&> buf) {
+                  return reinterpret_cast<ret_t>(buf.data());
                },
-               [this](std::unique_ptr<concept_interface>& ptr) {
+               [](std::conditional_t<bIsConst, std::unique_ptr<concept_interface> const&, std::unique_ptr<concept_interface>&> ptr) -> ret_t {
                   return ptr.get();
                }
-            }, m_data);
+            }, self.m_data);
+      }
+      concept_interface* ptr() noexcept {
+#ifdef DEBUG
+         dbgOut("Getting ptr to mutable");
+#endif
+         return ptr(*this);
       }
       concept_interface const* ptr() const noexcept {
-         return std::visit(overload{
-               [](std::monostate) -> concept_interface const* {
-                  return nullptr;
-               },
-               [this](buf_t const& buf) {
-                  return reinterpret_cast<concept_interface const*>(buf.data());
-               },
-               [this](std::unique_ptr<concept_interface> const& ptr) -> concept_interface const* {
-                  return ptr.get();
-               }
-            }, m_data);
+#ifdef DEBUG
+         dbgOut("Getting ptr to const");
+#endif
+         return ptr(*this);
       }
 
       class concept_interface {
