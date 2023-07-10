@@ -31,7 +31,7 @@ namespace ice {
    template<typename T> class function;
 
    template<typename R, typename... Args>
-   class function<R(Args...)> {
+   class function<R(Args...)> final {
       static constexpr std::size_t ALIGNMENT = 16;
       static constexpr std::size_t BUFFER_SIZE = 128;
 
@@ -44,20 +44,21 @@ namespace ice {
       function() = default;
       template<typename F, std::enable_if_t<not std::is_same_v<std::decay_t<F>, function>, bool> = true>
       function(F&& f) {
-         static_assert(alignof(F) <= ALIGNMENT, "type is overaligned");
-         static_assert(std::is_invocable_r_v<R, std::decay_t<F>, Args...>, "invocable does not match specified signature");
+         using stripped_t = std::decay_t<F>;
+         static_assert(alignof(stripped_t) <= ALIGNMENT, "type is overaligned");
+         static_assert(std::is_invocable_r_v<R, stripped_t, Args...>, "invocable does not match specified signature");
          
-         if constexpr(sizeof(std::decay_t<F>) <= BUFFER_SIZE) {
+         if constexpr(sizeof(stripped_t) <= BUFFER_SIZE) {
 #ifdef DEBUG
             dbgOut("Using SBO");
 #endif
             auto& buf = m_data.template emplace<buf_t>();
-            new (buf.data()) concept_impl<std::decay_t<F>>{ std::forward<F>(f) };
+            new (buf.data()) concept_impl<stripped_t>{ std::forward<F>(f) };
          } else {
 #ifdef DEBUG
             dbgOut("Using dynamic allocation");
 #endif
-            m_data = std::make_unique<concept_impl<std::decay_t<F>>>(std::forward<F>(f));
+            m_data = std::make_unique<concept_impl<stripped_t>>(std::forward<F>(f));
          }
       }
       function(function const& rhs) {
