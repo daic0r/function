@@ -84,11 +84,31 @@ namespace ice {
          return *this;
       }
       function(function&& rhs) noexcept
-         : m_data{ std::exchange(rhs.m_data, std::monostate{}) }
       {
 #ifdef DEBUG
          dbgOut("Move ctor");
 #endif
+         std::visit(overload {
+            [](std::monostate) {
+#ifdef DEBUG
+               dbgOut("\tMoving from monostate");
+#endif
+            },
+            [&rhs, this](buf_t&&) {
+#ifdef DEBUG
+               dbgOut("\tmoveCloning from buffer");
+#endif
+               auto& buf = m_data.template emplace<buf_t>();
+               rhs.ptr()->cloneMove(buf);
+               rhs.m_data.template emplace<std::monostate>();
+            },
+            [&rhs, this](std::unique_ptr<concept_interface>&&) {
+#ifdef DEBUG
+               dbgOut("\tMoving unique_ptr");
+#endif
+               m_data = std::exchange(rhs.m_data, std::monostate{});
+            }
+         }, std::move(rhs.m_data));
       }
       function& operator=(function&& rhs) noexcept {
 #ifdef DEBUG
@@ -176,11 +196,12 @@ namespace ice {
          virtual ~concept_interface() = default;
          virtual std::unique_ptr<concept_interface> clone() const = 0;
          virtual void clone(buf_t& mem) const = 0;
+         virtual void cloneMove(buf_t& mem) = 0;
          virtual R invoke(Args...) = 0;
       };
 
       template<typename Func>
-      class concept_impl : public concept_interface {
+      class concept_impl final : public concept_interface {
       public:
          template<typename F>
          concept_impl(F&& f) : m_func{ std::forward<F>(f) } {}
@@ -196,6 +217,10 @@ namespace ice {
 
          void clone(buf_t& mem) const override {
             new (mem.data()) concept_impl{ *this };
+         }
+
+         void cloneMove(buf_t& mem) override {
+            new (mem.data()) concept_impl{ std::move(*this) };
          }
 
          R invoke(Args... args) override {
