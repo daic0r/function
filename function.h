@@ -89,27 +89,7 @@ namespace ice {
 #ifdef DEBUG
          dbgOut("Move ctor");
 #endif
-         std::visit(overload {
-            [](std::monostate) {
-#ifdef DEBUG
-               dbgOut("\tMoving from monostate");
-#endif
-            },
-            [&rhs, this](buf_t&&) {
-#ifdef DEBUG
-               dbgOut("\tmoveCloning from buffer");
-#endif
-               auto& buf = m_data.template emplace<buf_t>();
-               rhs.ptr()->cloneMove(buf);
-               rhs.m_data.template emplace<std::monostate>();
-            },
-            [&rhs, this](std::unique_ptr<concept_interface>&&) {
-#ifdef DEBUG
-               dbgOut("\tMoving unique_ptr");
-#endif
-               m_data = std::exchange(rhs.m_data, std::monostate{});
-            }
-         }, std::move(rhs.m_data));
+         moveHelper(std::move(rhs), *this);
       }
       function& operator=(function&& rhs) noexcept {
 #ifdef DEBUG
@@ -133,7 +113,9 @@ namespace ice {
       }
 
       void swap(function& rhs) noexcept {
-         std::swap(m_data, rhs.m_data);
+         function tmp{ std::move(rhs) };
+         moveHelper(std::move(*this), rhs);
+         moveHelper(std::move(tmp), *this);
       }
 
       friend void swap(function& lhs, function& rhs) noexcept {
@@ -190,6 +172,30 @@ namespace ice {
          dbgOut("Getting ptr to const");
 #endif
          return ptr(*this);
+      }
+
+      static void moveHelper(function&& from, function& to) {
+         std::visit(overload {
+            [](std::monostate) {
+#ifdef DEBUG
+               dbgOut("\tMoving from monostate");
+#endif
+            },
+            [&from, &to](buf_t&&) {
+#ifdef DEBUG
+               dbgOut("\tmoveCloning from buffer");
+#endif
+               auto& buf = to.m_data.template emplace<buf_t>();
+               from.ptr()->cloneMove(buf);
+               from.m_data.template emplace<std::monostate>();
+            },
+            [&from, &to](std::unique_ptr<concept_interface>&&) {
+#ifdef DEBUG
+               dbgOut("\tMoving unique_ptr");
+#endif
+               to.m_data = std::exchange(from.m_data, std::monostate{});
+            }
+         }, std::move(from.m_data));
       }
 
       class concept_interface {
