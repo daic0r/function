@@ -174,6 +174,10 @@ namespace ice {
          return ptr(*this);
       }
 
+      bool isTriviallyMoveConstructible() const noexcept {
+         return ptr() != nullptr ? ptr()->isTriviallyMoveConstructible() : true;
+      }
+
       static void moveHelper(function&& from, function& to) {
          std::visit(overload {
             [](std::monostate) {
@@ -186,8 +190,13 @@ namespace ice {
                dbgOut("\tmoveCloning from buffer");
 #endif
                auto& buf = to.m_data.template emplace<buf_t>();
-               from.ptr()->cloneMove(buf);
-               from.m_data.template emplace<std::monostate>();
+               if (from.isTriviallyMoveConstructible()) {
+                  to.m_data = std::exchange(from.m_data, std::monostate{});
+               }
+               else {
+                  from.ptr()->cloneMove(buf);
+                  from.m_data.template emplace<std::monostate>();
+               }
             },
             [&from, &to](std::unique_ptr<concept_interface>&&) {
 #ifdef DEBUG
@@ -204,6 +213,7 @@ namespace ice {
          virtual std::unique_ptr<concept_interface> clone() const = 0;
          virtual void clone(buf_t& mem) const = 0;
          virtual void cloneMove(buf_t& mem) = 0;
+         virtual bool isTriviallyMoveConstructible() const noexcept = 0;
          virtual R invoke(Args...) = 0;
       };
 
@@ -228,6 +238,10 @@ namespace ice {
 
          void cloneMove(buf_t& mem) override {
             new (mem.data()) concept_impl{ std::move(*this) };
+         }
+
+         constexpr bool isTriviallyMoveConstructible() const noexcept {
+            return std::is_trivially_move_constructible_v<Func>;
          }
 
          R invoke(Args... args) override {
